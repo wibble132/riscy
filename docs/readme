@@ -3,3 +3,4 @@
 
 - minimal.uf2 is the simplest uf2 file that can be written to rp2350-risc-v, and has a single image header. there is no actual image.
 - single_loop.uf2 is a simple uf2 file that has an entry point item that points to a simple riscv loop (nop, jump)
+- turn_on_led*.uf2 are the 3 attempts it took me to turn on the onboard LED of the pico2 board. There were more registers that I kept not having set/unset, but I eventually got there with attempt3 which turns on the onboard LED at program start then enters an infinite loop. The first two are entirely non-functional but left for my happiness.
