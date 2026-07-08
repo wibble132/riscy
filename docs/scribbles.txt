@@ -1,0 +1,296 @@
+References:
+
+- https://riscv.org/specifications/ratified/
+- https://docs.riscv.org/reference/home/index.html
+- https://docs.riscv.org/reference/isa/v20260120/unpriv/rv32.html
+- https://docs.riscv.org/reference/isa/v20260120/unpriv/rv-32-64g.html
+- https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-008373-DS-2-rp2350-datasheet.pdf
+
+
+ROM:
+ 0x00000000; 32kB
+
+ Partition Table - strictly optional
+ Flash permissions - don't need, let it all be accessed
+ Image - data blob (code, data, or both)
+ Image definition - `IMAGE_DEF` structure (5.9.3)
+
+
+
+Blocks:
+
+- start with 0xffffded3
+- end of each item is the start another valid item
+- last item has type LAST, with correct full block length
+- ends with 0xab123579
+
+Block loops:
+
+- Cyclic linked list of blocks
+- Block links to next (relative pointer, 0 for self)
+- Last block links to first
+
+- discover which blocks are in same image
+- allow metadata to be added
+- detect things being correct (is the loop valid)
+
+The first 4kB is searched.
+Locate first block as close to the beginning of the binary as possible (speed)
+
+
+Address Translation:
+- not a thing on rp2040
+- think I can ignore this?
+- default behaviour is to map the start of a partition to runtime address of 0x1000_0000
+
+
+--------------
+
+Boot sequence:
+- Desired results:
+ - USB bootloader (to load the uf2) - this is just hold the BOOTSEL button, easy
+ - Run image from external flash
+
+Step: Try Flash Boot (default fallback when nothing else set)
+- Scan flash for a valid image with a range of instructions (EBh, BBh, 0Bh, 03h) and SCK divisors (3 to 24)
+  - unsure what the range of instructions or SCK divisors? think it is just ways of reading the flash chip since we don't know anything about it here
+- if image found:
+  - Enter flash image in the manner from its image definition
+  - (may include loading some flash into RAM)
+
+differences between arm and risc-v:
+- no secure boot
+- no anti-rollback checking
+- no additional security checks
+- bootloaders run in Machine mode (rather than changing from Arm Secure to Non-secure)
+- XIP setup function in boot RAM contains RISC-V instead of Arm
+
+
+- XIP Setup Function - do I need this? (i don't thinks so?)
+
+--------
+
+UF2 Format Details
+
+All data destined for device is in UF2 blocks with:
+- familyID (see 5.5.3)
+- payload_size of 256
+
+Must be for within the range 0x1000_0000-0x1200_0000, with 256-byte alignment. Writes beyond end of *physical* flash with wrap to beginning of flash!
+
+- numBLocks must specify total size of binary that fits in the region
+- change in numBlocks will cause discard
+- change in familyID will discard
+- must be in blocks without UF2_FLAG_NOT_MAIN_FLASH marking
+
+
+UF2 Format:
+
+series of 512-byte blocks. each block is:
+ - 0x0A324655
+ - 0x9E5D5157
+ - Flags (can be zero)
+ - target address
+ - bytes of data (256)
+ - block number (starts 0, increments)
+ - total block count in file
+ - file size or (board family ID if flag set) or zero
+ - (many) data
+ - 0x0AB16F30
+
+See minimal.uf2 for this simplest uf2 file, that contains the Minimum viable image metadata (5.9.5.)
+
+----- Loading Code -----
+
+Code is started at 0x1000_0000
+
+This is where I previously put the image block header, but that can be put anywhere in the first 4K.
+
+So put a loop at 0x1000_0000, and the header can just be a bit afterwards.
+
+
+----- What can code do? -----
+
+What do I do now? Can I just turn on a GPIO pin?
+
+
+IO_BANK0_BASE = 0x40028000
+0x0c8 GPIO25_STATUS
+0x0cc GPIO25_CTRL
+
+set control to have bits [13:12] 0x3, OUTOVER: HIGH: drive output high
+write [00,30,00,00] to address 0x400280CC
+
+
+SW: (op 0100011) (width 010) rs1, rs2, imm
+
+effective address is rs1 + 12bit offset from imm
+
+stores copy rs2 to memory.
+
+
+To load the value in x10, we can:
+ADDI x10,x0,0x3  # Set x10 to 3
+SLL x10,x10,12   # Shift left by 12 bits, gives 0x00003000 as desired
+
+Then to store at the address:
+
+S-type
+SW - store a word (4 bytes - yep!)
+from rs2 (x10)
+into address at (rs1 + signed immediate)
+
+immediate is 12 bits (11 and a sign)
+We want to be in 0x400280CC, which has NOT got 12th bit set (phew)
+So this can be
+LUI x11, 0x40028
+SW x10,0x0CC(x11)
+
+
+#### OPENOCD - need the openocd-rp2040 nix package for this (due to reasons)
+
+sudo openocd -f interface/cmsis-dap.cfg -c "adapter speed 5000" -f target/rp2350-riscv.cfg
+
+gdb
+set architecture riscv:rv32
+target extended-remote localhost:3333
+monitor reset halt
+info register pc
+
+
+---------- Turn on LED (attempt 2) ----------
+
+Well, the above didn't work..
+
+Reading more of the docs, I think I need to:
+
+Set F5 (SIO function) on the GPIO_CTRL, then set GPIO_OE, GPIO_OUT for the pin.
+
+"By default, all pads come out of reset ready to use, with input enabled and output disable set to 0"
+in sdk, gpio_set_function sets input enable and clears output disable to engage buffers.
+then desired function is written to CTRL register.
+
+Need to read 3.1 again (SIO)
+
+
+So:
+1. Select SIO function on pin 25
+2. Set OutputEnable (GPIO_OE) for the pin to be able to drive high/low
+3. Set GPIO_OUT for the pin
+
+GPIO25_CTRL (offset 0x0cc, in IO User bank with base 0x40028000):
+[29:28] - interrupt, leave as 0
+[17:16] - peri input? idk, leave as 0
+[15:14] - "drive output enable from peripheral signal selected by funcsel"? sounds right? leave as 0
+[13:12] - "drive output from peripheral signal selected by funcsel" - leave as 0
+[4:0] - 0x05 SIO_25
+
+so  -- step 1 -- need to load 0x05 to address 0x400280CC
+
+GPIO_OE (offset 0x030, in SIO registers with base 0xd0000000)
+set to value (1 << 25)
+-- step 2 -- load 1<<25 to address 0xd0000030
+
+GPIO_OUT (offset 0x010, in SIO registers with base 0xd0000000)
+set to (1 << 25)
+-- step 3 -- load 1<<25 to address 0xd0000010
+
+Instructions to do this:
+# Step 1
+addi x10, x0, 5    # Load value 5 into x10
+LUI x11, 0x40028   # Load upper part of the address into x11
+SW x10,0x0CC(x11)  # Write x10 to (0x0CC + x11)
+# Step 2
+addi x10, x0, 1    # Load value 1 into x10
+slli x10,x10,0x19  # Shift x10 to the left by 0x19(=25)
+LUI x11, 0xd0000   # Load upper part of the address into x11
+SW x10,0x030(x11)  # Write x10 to (0x030 + x11)
+# Step 3 (reuse x10,x11 from above)
+SW x10,0x010(x11)
+
+
+----- Attempt 3 -----
+
+Ok, let's use the SDK for reference. The spec 9.10.1 links to https://github.com/raspberrypi/pico-sdk/blob/master/src/rp2_common/hardware_gpio/gpio.c#L36-L53
+
+gpio_set_function(uint gpio, gpio_function_t fn):
+1. write to pads_bank0_hw->io[gpio] - on the bank, sets input enable ON, output disable OFF
+    - see 9.11.3.
+    - base 0x40038000
+    - gpio 25 is offset 0x68
+    - set bit 7, unset bit 8
+    - (will have to read-modify-write)
+2. set GPIO25_CTRL to the function (already doing)!
+
+
+Also, should do gpio_set_dir - just a write to GPIO_OE
+
+In the blink example:
+ - init:
+   - gpio_init
+     - set_dir(IN)
+     - put(0)
+     - set_function(SIO)
+   - set_dir(OUT)
+   - put(1)
+
+put: write to SIO GPIO_OUT_SET/GPIO_OUT_CLR
+set_dir: out - write to SIO GPIO_OE_SET, in - write to SIO GPIO_OE_CLR
+set_function - as above, write to BANK0 GPIO to set IE, unset OE. Then set GPIO_CTRL to SIO
+
+
+so
+- set_dir(IN):
+  - SIO(0xd0000000) GPIO_OE_CLR(+0x040), write (1 << 25)
+- put(0):
+  - SIO(0xd0000000) GPIO_OUT_CLR(+0x020), write (1 << 25)
+- set_function(SIO)
+  - BANK0(0x40038000) GPIO25(+0x68)
+    - read
+    - & ~(1 << 7)
+    - | (1 << 6)
+    - write
+  - IO Userbank(0x40028000) GPIO25_CTRL(+0x0cc), write 0x05
+- set_dir(OUT)
+  - SIO(0xd0000000) GPIO_OE_SET(+0x038), write (1 << 25)
+- put(0):
+  - SIO(0xd0000000) GPIO_OUT_SET(0x018), write (1 << 25)
+
+in assembly:
+
+x10: 0xd0000000 (10 = 0x01010) (SIO BASE)
+x11: (1 << 25)  (11 = 0x01011)
+x12: 0x40028000 (12 = 0x01100) (IO Userbank base)
+x13: 0x40038000 (12 = 0x01101) (BANK0 base)
+x14: temp var   (13 = 0x01110)
+
+
+# Load x10
+LUI x10,0xd0000                                 0b11010000_00000000_00000101_00110111  37,05,00,D0
+# Load x11 to (1 << 25)
+ADDI x11,x0,1                                   0b00000000_00010000_00000101_10010011  93,05,10,00
+SLLI x11,x11,0x19                               0b00000001_10010101_10010101_10010011  93,95,95,01
+# Load x12
+LUI x12,0x40028                                 0b01000000_00000010_10000110_00110111  37,86,02,40
+# Load x13
+LUI x13,0x40038                                 0b01000000_00000011_10000110_10110111  B7,86,03,40
+
+# write x11 to SIO + GPIO_OE_CLR(+0x040)
+SW x11,0x040(x10)                               0b00000100_10110101_00100000_00100011  23,20,B5,04
+# write x11 to SIO + GPIO_OUT_CLR(+0x020)
+SW x11,0x020(x10)                               0b00000010_10110101_00100000_00100011  23,20,B5,02
+# read x14 from BANK0 + GPIO25(+0x68)
+LW x14(rd),0x68(x13)                            0b00000110_10000110_10100111_00000011  03,A7,86,06
+# &= ~(1<<7 | 1<<8), |= (1<<6)
+ANDI x14,x14,0xE7F                              0b11100111_11110111_01110111_00010011  13,77,F7,E7
+ORI x14,x14,0x040                               0b00000100_00000111_01100111_00010011  13,67,07,04
+# store x14 back into BANK0 + GPIO25(+0x68)
+SW x14,0x68(x13)                                0b00000110_11100110_10100100_00100011  23,A4,E6,06
+# write 0x05 to IO Userbank + GPIO25_CTRL(+0x0cc)
+ADDI x14,x0,0x05                                0b00000000_01010000_00000111_00010011  13,07,50,00
+SW x14,0x0cc(x12)                               0b00001100_11100110_00100110_00100011  23,26,E6,0C
+# write x11 to SIO + GPIO_OE_SET(+0x038)
+SW x11,0x038(x10)                               0b00000010_10110101_00101100_00100011  23,2C,B5,02
+# write x11 to SIO + GPIO_OUT_SET(+0x018).
+SW x11,0x018(x10)                               0b00000000_10110101_00101100_00100011  23,2C,B5,00
+

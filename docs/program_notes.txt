@@ -1,0 +1,21 @@
+
+
+
+simple-loop assembly
+
+0x10000000: nop
+0x10000004: j -4
+
+simple-loop binary
+
+0x10000000: 00000013    # addi x0,x0,0)
+0x10000004: ffdff06f    # j x0,(-4)
+
+
+
+What next?
+
+Turn on the internal LED? Is that feasible? I don't think that would require any clocks setup.
+
+
+

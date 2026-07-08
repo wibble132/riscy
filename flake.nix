@@ -28,6 +28,11 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             rust
+            picotool
+            busybox
+            openocd-rp2040
+            gdb
+            hexdump
           ];
         };
       }

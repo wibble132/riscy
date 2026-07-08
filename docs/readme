@@ -1,0 +1,5 @@
+
+## The UF2 files:
+
+- minimal.uf2 is the simplest uf2 file that can be written to rp2350-risc-v, and has a single image header. there is no actual image.
+- single_loop.uf2 is a simple uf2 file that has an entry point item that points to a simple riscv loop (nop, jump)

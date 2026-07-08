@@ -1,0 +1,206 @@
+RV32I (Risc V, 32bit, 32 registers)
+[RV32E is for 16 registers]
+
+32 `x` registers, 32bit wide
+x0 == 0 always
+x1-x32 hold values for instructions
+pc holds address of current instruction
+
+Convention:
+ - x1 for return address
+ - x5 as an alternative link register
+ - x2 as a stack pointer
+
+
+4 core instruction formats. All 32 bit. alignment of 32.
+R-Type:
+{
+  funct7    [31:25],
+  rs2       [24:20],
+  rs1       [19:15],
+  funct3    [14:12],
+  rd        [11: 7],
+  opcode    [ 6: 0],
+}
+I-Type:
+{
+  imm[11:0] [31:20],
+  rs1       [19:15],
+  funct3    [14:12],
+  rd        [11: 7],
+  opcode    [ 6: 0],
+}
+S-Type:
+{
+  imm[11:5] [31:25],
+  rs2       [24:20],
+  rs1       [19:15],
+  funct3    [14:12],
+  imm[4:0]  [11: 7],
+  opcode    [ 6: 0],
+}
+U-Type:
+{
+  imm[32:12] [31:12],
+  rd         [11: 7],
+  opcode     [ 6: 0],
+}
+
+NOTE: imm is signed with sign bit in instruction bit 31
+
+INTEGER COMPUTATION
+i-type or r-type
+dest is rd
+no exceptions
+
+ADDI - i-type; add immediate to rs1; sets the lower XLEN bits
+pseudo MV rd,rs1 -> ADDI rd,rs1,0
+NOP(ps); = ADDI x0,x0,0;
+SLTI[U] - i-type; add
+SLTI[U] - i-type; add 
+
+
+AUIPC (Add upper immediate to pc);
+
+
+=== ARITHMETIC INT-INT CALCULATIONS ===
+
+SLT[U] rd,rs1,rs2; - Set less than (if rs1 < rs2 { 1 -> rd } else { 0 -> rd })
+SNEZ rd,rs; - Set not eq z = SLTU rd,x0,rs2;
+AND/OR/XOR rd,rs1,rs2; (bitwise)
+SLL,SRL,SRA rd,rs1,rs2; - logical/arithmetic shifts of rs1 by (rs2 mod 32)
+
+=== JUMPS ===
+
+JAL rd,imm; Jump and Link (J-type) (Signed offset in multiple of 2 bytes, target +/-1MB, stores address after JAL into rd (e.g. return address)
+JALR rd,rs1,imm; Jump and Link Register (I-type) (Target is (imm + rs1) with lsb->0; instruction after JALR address -> rd. Useful after a LUI)
+JR(ps) rd,rs1,imm; = JALR x0,rs1,imm; (Unconditional Indirect Jump)
+RET(ps); = JALR x0,x1,0; (Return in standard calling convention)
+
+=== BRANCHES ===
+(all B-type, opcode = BRANCH, funct3 to pick the type)
+
+BEQ offset,src1,src2 - branch equal
+BNE offset,src1,src2 - branch not equal
+BLT[U] offset,src1,src2 - branch less than [unsigned]
+BGE[U] offset,src1,src2 - branch greater than or equal [unsigned]
+(can synthesise BGT[U] and BLE[U] by reversing args to the two above)
+
+- Should always use JAL with rd=x0 for unconditional jumps
+- target address should be four-byte aligned
+
+=== Load and Store ===
+
+Load - I-type - dest rd,width funct3,base rs1,offset imm
+effective address - add rs1 to sign-extended offset. loads a copy from memoty into rd.
+LW - loads 32-bit into rd
+LH - loads 16-bit from memory, sign-extend to 32-bit, store in rd
+LHU - loads 16-bit from memory, zero-extend to 32-bit, store in rd
+LB[U] - as LH[U] but 8-bit
+
+SW,SH,SB - store 32-bit, 16-bit, 8-bit values from the low bits of rs2 into memory
+
+(Alignment should be kept for the load/stores, it is EEI-specific if unaligned is allowed)
+
+
+=== Others ===
+
+I am ignoring Memory Ordering Instructions (FENCE), Environment Call and Breakpoints (ECALL, EBREAK), and Hints.
+
+
+-------------------------------
+
+
+Memory addresses
+
+0x20000000-0x20081fff - Main SRAM
+
+0x400e0000 - Bootrom Base
+
+-------------------------------
+
+
+Minimal image metadata
+
+0.  0xffffded3          PICOBIN_BLOCK_MARKER_START
+1.  0x10210142          0x42 PICOBIN_BLOCK_ITEM_1BS_IMAGE_TYPE;
+                        0x01 Item 1 word in size;
+                        0x21, 0x10: image type EXE (0b01) | cpu type RISCV (0b001_0000_0000) | chip 2350 (0b001_0000_0000_0000)
+2. 0x000001ff           size_type==1, item_type==PICOBIN_BLOCK_ITEM_2BS_LAST;
+                        0x0001 size
+                        0x00 pad
+3. 0x00000000           Relative pointer to next block in block loop
+4. 0xab123579           PICOBIN_BLOCK_MARKER_END
+
+
+ENTRY_POINT ITEM
+initial program counter, stack pointer, and (optional) stack pointer limit
+0. 0x44, 0x03, 0x0000  (size_flag = 0; item_type = entry point, block size, padding)
+1. initial PC (runtime) address (entrypoint)
+2. initial SP address (stack pointer)
+(replace 0x03 in header with 0x04, then can include an SP limit address)
+
+-----------
+
+simple code:
+
+10001000: NOP (=ADDI x0,x0,0)
+10001004: J -4 (=JAL x0,-4)
+
+ADDI x0,x0,0 is
+   |31      |23      |15      |7
+(0b00000000_00000000_00000000_00010011 = [0x13,0x00,0x00,0x00])
+
+JAL x0,-4 is
+   |31      |23      |15      |7
+(0b11111111_11011111_11110000_01101111 = [0x6F,0xF0,0xDF,0xFF])
+
+
+ADDI x10,x0,3 is
+   |31      |23      |15      |7
+(0b00000000_00110000_00000101_00010011 = [0x13,0x05,0x30,0x00])
+
+SLLI x10,x10,12 is
+   |31      |23      |15      |7
+(0b00000000_11000101_00010101_00010011 = [0x13,0x15,0xC5,0x00])
+
+LUI x11,0x40028 is
+   |31      |23      |15      |7
+(0b01000000_00000010_01000101_10110111 = [0xb7,0x85,0x02,0x40])
+
+SW x10,x11,0x0CC is (0x0CC=0b0000_1100_1100)
+   |31      |23      |15      |7
+(0b00001100_10110101_00100110_00100011 = [0x23,0xA6,0xA5,0x0C])
+
+
+JAL x0,-(4*6) is
+   |31      |23      |15      |7
+(0b11111111_11011111_11110000_01101111 = [0x6F,0xF0,0xDF,0xFF])
+[[ THIS IMM NEEDS CHECKING ]]
+
+
+
+ADDI x10, x0, 5 is
+  |31      |23      |15      |7
+(0b00000000_01010000_00000101_00010011 = [0x13,0x05,0x50,0x00])
+LUI x11, 0x40028 is
+  |31      |23      |15      |7
+(0b00100000_00000010_01000101_10110111 = [0xb7,0x85,0x02,0x40])
+SW x10rs2,0x0CC(x11rs1) is (0x0CC=0b0000110_01100)
+  |31      |23      |15      |7
+(0b00001100_10100101_10100110_00100011 = [0x23,0xA6,0xA5,0x0C])
+ADDI x10, x0, 1
+  |31      |23      |15      |7
+(0b00000000_00010000_00000101_00010011 = [0x13,0x05,0x10,0x00])
+SLLI x10,x10,0x019
+  |31      |23      |15      |7
+(0b00000001_10010101_00010101_00010011 = [0x13,0x15,0x95,0x01])
+LUI x11, 0xd0000
+  |31      |23      |15      |7
+(0b11010000_00000000_00000101_10110111 = [0xb7,0x05,0x00,0xd0])
+SW x10,0x030(x11)  (0x030=0b0000001_10000)
+  |31      |23      |15      |7
+(0b00000010_10100101_10101000_00100011 = [0x23,0xA8,0xA5,0x02])
+SW x10,0x010(x11)  (0x030=0b0000000_10000)
+  |31      |23      |15      |7
+(0b00000000_10100101_10101000_00100011 = [0x23,0xA8,0xA5,0x00])
