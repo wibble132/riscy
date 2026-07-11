@@ -294,3 +294,55 @@ SW x11,0x038(x10)                               0b00000010_10110101_00101100_001
 # write x11 to SIO + GPIO_OUT_SET(+0x018).
 SW x11,0x018(x10)                               0b00000000_10110101_00101100_00100011  23,2C,B5,00
 
+
+-- trimming down --
+
+The above was copying the SDK's steps, but has some redundancy.
+1. The writes to GPIO_OE_CRL and GPIO_OUT_CLR are not needed. they reset the pins to the same state they are on boot.
+2. The LW,ANDI,ORI,SW can probably be tidied to fewer instructions
+3. I don't need that ORI, since it is IE(InputEnable) and I don't care for input!
+
+For 2, note 2.1.3 in the manual ADDR+0x2000 is an atomic bitmask set, ADDR+0x3000 is atomic bitmask clear
+(not for SIO section, but this does work for the BANK0)
+So I want to write (1<<7 | 1<<8) to BANK0+0x3068.
+
+So:
+# BANK0(0x40038000) GPIO25 (+0x68) clear bits(+0x3000) 0b0001_1000_0000
+# (Clear pad isolation and output disable)
+LUI x10,0x4003B
+ADDI x11,x0,0x180
+SW x11,0x068(x10)
+# IO Userbank (0x40028000) GPIO25_CTRL(+0x0cc) 0x005
+# (Set GPIO 25 function to SIO)
+LUI x10,0x40028
+ADDI x11,x0,0x005
+SW x11,0x0CC(x10)
+# SIO (0xd0000000) GPIO_OE_SET(+0x038) (1<<25=0b10_0000_0000_0000_0000_0000_0000)
+# (Enable GPIO 25 to output)
+LUI x10,0xd0000
+LUI x11,0x02000
+SW x11,0x038(x10)
+# SIO (0xd0000000) GPIO_OUT_SET(+0x018) (1<<25=0b10_0000_0000_0000_0000_0000_0000)
+# (Set the output value for GPIO 25 to ON)
+SW x11,0x018(x10)
+
+10 instructions
+   01000000_00000011_10110101_00110111  [37,B5,03,40]
+   00011000_00000000_00000101_10010011  [93,05,00,18]
+   00000110_10110101_00100100_00100011  [23,24,B5,06]
+   01000000_00000010_10000101_00110111  [37,85,02,40]
+   00000000_01010000_00000101_10010011  [93,05,50,00]
+   00001100_10110101_00100110_00100011  [23,26,B5,0C]
+   11010000_00000000_00000101_00110111  [37,05,00,D0]
+   00000010_00000000_00000101_10110111  [B7,05,00,02]
+   00000010_10110101_00101100_00100011  [23,2C,B5,02]
+   00000000_10110101_00101100_00100011  [23,2C,B5,00]
+
+
+
+
+
+
+
+
+
