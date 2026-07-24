@@ -340,9 +340,41 @@ SW x11,0x018(x10)
 
 
 
+--- Now let's blink! ---
 
+Want to turn on LED, wait 1s(ish) then turn it off, wait 1s(ish), then loop
 
+How can I do a delay? easiest way is spin loop with countdown
 
+<LOAD BIGNUM TO x10>
+ADDI x10,x10,-1
+BNE x10,x0,-4 (imm = 0b111111111110 weirdly encoded)
 
+what should this bignum be though? ROSC is nominally 11MHz, so lets wait 11_000_000 clock cycles.
+The loop is 2 instructions, this is 2 cycles (the first cycle will be 1 extra due to branch misprediction)
+So use BIGNUM=5_500_000=0x53EC60
 
+LUI x10,0x0053E
+ADD x10,x10,0xC60
+
+We can also do this as a function-style thing
+
+main(0x1000_0000):
+  <setup LED as above>
+
+  <some NOP padding (or a jump)
+
+loop(0x1000_0050):
+0050:  SW LED ON
+0054:  JAL x1,wait
+0058:  SW LED OFF
+005B:  JAL x1,wait
+0060:  J loop (-16)
+
+wait(0x1000_0100): (next UF2 block, makes it simple)
+  LUI x10,0x0053E
+  ADD x10,x10,0xC60
+  ADDI x10,x10,-1
+  BNE x10,x0,-4
+  RET (=JALR x0(rd),x1(rs1),0(imm))
 

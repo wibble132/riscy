@@ -1,0 +1,175 @@
+
+
+
+
+To setup GPIO N:
+  # Reset the pin to avoid accidental output
+  SIO:GPIO_OE_CLR write (1 << N)  (clear output enable)
+  SIO:GPIO_OUT_CLR write (1 << N) (clear output value)
+  # Disable isolation, clear output disable
+  PADSBANK0:GPIO[N] clear bit 8,7, write bit 6 (BANK0:GPION = BANK0 + 4*(N+1))
+  # Set pin function to SIO
+  IO_USER_BANK0:GPIO[N]_CTRL write 0x05 (IO_USER_BANK0:GPIO[N]_CTRL = IO_USER_BANK0 + 8*N + 1)
+
+Then set the direction:
+  # Write for output, clear for input
+  SIO:GPIO_OE_SET write/clear (1 << N)
+
+
+The assembly for this
+
+setup_pin: (x10 = pin number, MUST be in 0..31)
+      # Load x5 to SIO base
+0200  LUI x5,0xd0000                                [B7,02,00,D0]
+      # Load x6 = 1 << N
+0204  ADDI x6,x0,1                                  [13,03,10,00]
+0208  SLL x6,x6,x10                                 [33,13,A3,00]
+      # clear SIO output enable for this pin
+020C  SW x6,0x040(x5)                               [23,A0,62,04]
+      # clear SIO output for this pin
+0210  SW x6,0x020(x5)                               [23,A0,62,02]
+      # Load x5 to PADS_BANK0(0x40038000) bitmask CLEAR alias(+0x3000)
+0214  LUI x5,0x4003B                                [B7,B2,03,40]
+      # Load x6 with 4*(N+1)
+0218  ADDI x6,x10,0x001  # (N+1)                    [13,03,15,00]
+021C  SLLI x6,x6,0x002   # left shift 2 = mult 4    [13,13,23,00]
+      # Set x5 to PADS_BANK0:GPIO[N] bitmask set
+0220  ADD x5,x5,x6                                  [B3,82,62,00]
+      # Disable isolation, clear output disable
+0224  ADDI x7,x0,0x180                              [93,03,00,18]
+0228  SW x7,0x000(x5)                               [23,A0,72,00]
+      # Load x5 to PADS_BANK0(0x40038000) bitmask SET alias(+0x2000)
+022C  LUI x5,0x4003A                                [B7,A2,03,40]
+      # Set x5 to PADS_BANK0:GPIO[N] bitmask clear
+0230  ADD x5,x5,x6                                  [B3,82,62,00]
+      # Set enable input
+0234  ADDI x7,x0,0x040                              [93,03,00,04]
+0238  SW x7,0x000(x5)                               [23,A0,72,00]
+
+      # Need to set IO_BANK0.GPIO[N]_CTRL to 5 (function SIO)
+      # GPIO[N]_CTRL is 8*N + 4
+      # Load the address
+023C  LUI x5,0x40028                                [B7,82,02,40]
+0240  SLLI x6,x10,0x003                             [13,13,35,00]
+0244  ADDI x6,x6,0x004                              [13,03,43,00]
+0248  ADD x5,x5,x6                                  [B3,82,62,00]
+      # Load value to store
+024C  ADDI x6,x0,0x005                              [13,03,50,00]
+      # Store it
+0250  SW x6,0x000(x5)                               [23,A0,62,00]
+0254  RET (=JALR x0,0x000(x1))                      [67,80,00,00]
+
+
+set_direction: (x10 = pin_number MUST be 0..31; x11 0 for IN, 1 for OUT)
+      # Load x5 to SIO_BASE
+0280  LUI x5,0xd0000                                [B7,02,00,d0]
+      # SIO:GPIO_OE_SET is 0x038, SIO:GPIO_OE_CLR is 0x040
+      # x5 = x5 + 0x040 - (8 * x11)
+0284  SLLI x6,x11,3  # (8 * x11)                    [13,93,35,00]
+0288  SUB x5,x5,x6                                  [B3,82,62,40]
+028C  ADDI x6,x0,0x001                              [13,03,10,00]
+0290  SLL x6,x6,x10                                 [33,13,A3,00]
+0294  SW x6,0x040(x5)                               [23,A0,62,04]
+0298  RET                                           [67,80,00,00]
+
+
+# PIN must previously have set_direction(IN) called
+read_pin: (x10 = pin_number MUST be 0..31) -> (x10 1 if HIGH, 0 if LOW)
+0300  LUI x5,0xd0000                                [B7,02,00,d0]
+0304  LW x6,0x004(x5)                               [03,A3,42,00]
+0308  SRL x6,x6,x10                                 [33,53,A3,00]
+030C  ANDI x10,x6,0x001                             [13,75,13,00]
+0310  RET                                           [67,80,00,00]
+
+
+# PIN must previously have set_direction(OUT) called
+write_pin: (x10 = pin_number MUST be 0..31; x11 = 1 for ON, 0 for OFF)
+0380  LUI x5,0xd0000                                [B7,02,00,D0]
+      # x6 = (1 << x10)
+0384  ADDI x6,x0,0x001                              [13,03,10,00]
+0388  SLL x6,x6,x10                                 [33,13,A3,00]
+      # If x11 is 1, write to 0x018
+      # If x11 is 0, write to 0x020
+      # Let x5 = x5 - (8 * x11)
+      # Then read from offset of 0x020 will be the correct register
+038C  SLLI x11,x11,3                                [93,95,35,00]
+0390  SUB x5,x5,x11                                 [B3,82,B2,40]
+0394  SW x6,0x020(x5)                               [23,A0,62,02]
+0398  RET                                           [67,80,00,00]
+
+
+
+### Single-button main
+
+      # Init GPIO 0 as output
+0000  ADDI x10,x0,0                                 [13,05,00,00]
+0004  JAL x1,setup_pin(->0200,0x001FC)              [EF,00,C0,1F]
+0008  ADDI x10,x0,0                                 [13,05,00,00]
+000C  ADDI x11,x0,1                                 [93,05,10,00]
+0010  JAL x1,set_direction(->0280,0x00270)          [EF,00,00,27]
+      # INIT GPIO 20 as input
+0014  ADDI x10,x0,0x014                             [13,05,40,01]
+0018  JAL x1,setup_pin(->0200,0x001E8)              [EF,00,80,1E]
+001C  ADDI x10,x0,0x014                             [13,05,40,01]
+0020  ADDI x11,x0,0x000                             [93,05,00,00]
+0024  JAL x1,set_direction(->0280,0x0025C)          [EF,00,C0,25]
+
+loop:
+0028  ADDI x10,x0,0x14                              [13,05,40,01]
+002C  JAL x1,read_pin(->0300,0x002D4)               [EF,00,40,2D]
+      # value of pin is now in x10, move it to x11
+0030  ADDI x11,x10,0x000                            [93,05,05,00]
+0034  ADDI x10,x0,0x000                             [13,05,00,00]
+0038  JAL x1,set_pin(->0380,0x00348)                [EF,00,80,34]
+003C  JAL x0,loop(-0x14=0xFFFEC)                    [6F,F0,DF,FE]
+
+
+### Two-button main
+
+
+      # Init GPIO 0 as output
+0000  ADDI x10,x0,0                                 [13,05,00,00]
+0004  JAL x1,setup_pin(->0200,0x001FC)              [EF,00,C0,1F]
+0008  ADDI x10,x0,0                                 [13,05,00,00]
+000C  ADDI x11,x0,1                                 [93,05,10,00]
+0010  JAL x1,set_direction(->0280,0x00270)          [EF,00,00,27]
+      # INIT GPIO 20 as input
+0014  ADDI x10,x0,0x014                             [13,05,40,01]
+0018  JAL x1,setup_pin(->0200,0x001E8)              [EF,00,80,1E]
+001C  ADDI x10,x0,0x014                             [13,05,40,01]
+0020  ADDI x11,x0,0x000                             [93,05,00,00]
+0024  JAL x1,set_direction(->0280,0x0025C)          [EF,00,C0,25]
+      # INIT GPIO 21 as input
+0028  ADDI x10,x0,0x015                             [13,05,50,01]
+002C  JAL x1,setup_pin(->0200,0x001D4)              [EF,00,40,1D]
+0030  ADDI x10,x0,0x015                             [13,05,50,01]
+0034  ADDI x11,x0,0x000                             [93,05,00,00]
+0038  JAL x1,set_direction(->0280,0x00248)          [EF,00,80,24]
+
+
+    # x8: previous GPIO 21 value (to detect change-to-on)
+    # x9: LED toggle value (changes whenever GPIO 21 pressed)
+    # These are callee-saved, so won't be overwritten by functions
+003C ADDI x8,x0,0                                   [13,04,00,00]
+0040 ADDI x9,x0,0                                   [93,04,00,00]
+
+loop:
+      # Read GPIO 21, loads into x10
+0044  ADDI x10,x0,0x015                             [13,05,50,01]
+0048  JAL x1,read_pin(->0300,+0x002B8)              [EF,00,80,2B]
+      # If x8 is 0 and x10 is 1 (i.e. not 0), button was just pressed. So toggle x9
+004C  BNE x8,x0,label1(+0x00C)                      [63,16,80,00]
+0050  BEQ x10,x0,label1(+0x008)                     [63,04,A0,00]
+0054  XORI x9,x9,0x001                              [93,C4,14,00]
+label1:
+0058  ADDI x8,x10,0x000                             [13,04,05,00]
+
+      # Read GPIO 20, loads in x10
+005C  ADDI x10,x0,0x14                              [13,05,40,01]
+0060  JAL x1,read_pin(->0300,0x002A0)               [EF,00,00,2A]
+      # Turn LED on if x6 is on XOR button 21 is pressed
+0064  XOR x11,x10,x9                                [B3,45,95,00]
+0068  ADDI x10,x0,0x000                             [13,05,00,00]
+006C  JAL x1,set_pin(->0380,0x00314)                [EF,00,40,31]
+0070  JAL x0,loop(->0044,-28,0xFFFD4)               [6F,F0,5F,FD]
+

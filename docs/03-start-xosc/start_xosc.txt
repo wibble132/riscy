@@ -1,0 +1,31 @@
+I want to start the xosc, so that the timer for the LED is more accurate.
+
+So:
+
+Since pico2 uses the recommended crystal, I don't think I need to set STARTUP_DELAY - the default value post-reset is sufficient.
+
+So I can just set CTRL_ENABLE:
+
+XOSC: CRTL 0x40048000 + 0x00
+ENABLE[23:12] 0xfab -> ENABLE
+FREQ_RANGE[11:0]: 0xaa0 -> 1_15MHZ (we have 12MHZ)
+
+Then wait for the XOSC(0x40048000):STATUS(+0x04).STABLE[31] to become 1
+
+
+Use the atomic bitmask set alias of the register (+0x2000) for the enable
+
+0024: LUI x5,0x40048                          [B7,82,04,40]
+# Write 0x00fabaa0 to set enable and freq range
+0028: LUI x6,0x00fac                          [37,C3,FA,00]
+002C: ADDI x6,x6,0xaa0                         [13,03,03,AA]  aa0 0011_00000011_00010011
+0030: SW x6,0x000(x5) # Write XOSC:CTRL.ENABLE to ENABLE  [23,A0,62,00]
+
+# Loop until XOSC:STATUS.STABLE is 1
+
+0034: LW x6,0x004(x5)  # Load status value       [03,A3,42,00]
+0038: SRLI x6,x6,31 # shift by 31, leaving [31]  [13,53,F3,01]
+003C: BEQ x6,x0,-8                               [E3,0C,60,FE]
+0040: NOP              )                         [13,00,00,00]
+.. (nop until 0050, next instrs)
+

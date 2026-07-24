@@ -1,0 +1,60 @@
+
+The simple approach would be to start a countdown from a large-ish number, decrement, continuing when we reach 0.
+
+main:
+setup_led:0
+0000: LUI x10,0x4003B                       [37,B5,03,40]
+0004: ADDI x11,x0,0x180                     [93,05,00,18]
+0008: SW x11,0x068(x10)                     [23,24,B5,06]
+000C: LUI x10,0x40028                       [37,85,02,40]
+0010: ADDI x11,x0,0x005                     [93,05,50,00]
+0014: SW x11,0x0CC(x10)                     [23,26,B5,0C]
+0018: LUI x10,0xd0000                       [37,05,00,D0]
+001C: LUI x11,0x02000                       [B7,05,00,02]
+0020: SW x11,0x038(x10)                     [23,2C,B5,02]
+0024: JAL x0,loop (loop=+0x0002C)           [6F,00,C0,02]
+
+loop:
+0050:  SW x11,0x018(x10)                    [23,2C,B5,00]
+0054:  JAL x1,wait  (wait=+0x000AC)         [EF,00,C0,0A]
+0058:  SW x11,0x020(x10)                    [23,20,B5,02]
+005C:  JAL x1,wait  (wait=+0x000A4)         [EF,00,40,0A]
+0060:  J loop (-16)                         [6F,F0,1F,FF]
+
+wait:
+0100  LUI x5,0x0053E                        [B7,E2,53,00]
+0104  ADDI x5,x5,0xC60                      [93,82,02,C6]
+0108  ADDI x5,x5,-1                         [93,82,F2,FF]
+010C  BNE x5,x0,-4                          [E3,1E,50,FE]
+0110  RET (=JALR x0(rd),x1(rs1),0(imm))     [67,80,00,00]
+
+
+
+But the rp2350 does have timer peripherals (12.8)
+
+TIMER0: 0x400b0000
+1. read timer timelr(+x0c), then timerhr(+x08), to get 64bit current time
+2. add 1million (1mill us -> 1s) = 0xF4240 --> LIMIT
+3. in a loop:
+3.1.   read time again
+3.2    break if > LIMIT
+
+This is still a busy spin loop, but it will be based on us instead of estimating from clock ticks
+Changed assembly:
+
+wait:
+0100 LUI  x5,0x400b0                        [B7,02,0b,40]
+0104 LW   x6,0x00c(x5)                      [03,A3,C2,00]
+# Add 0x4240 to x6 (first load it into x7, then add)
+0108 LUI  x7,0x000F4                        [B7,43,0F,00]
+010C ADDI x7,x7,0x240                       [93,83,03,24]
+0110 ADD  x6,x6,x7                          [33,03,73,00]
+# Now do a spinloop
+0114 LW   x7,0x00c(x5)  # Load timelr again [83,A3,C2,00]
+0118 BLTU x7(rs1)<x6(rs2),-4                [E3,EE,63,FE]
+011C RET				    [67,80,00,00]
+
+
+So this is 2 more instructions, and the effect is basically the same? Ah, but I can encode the wait time in ms
+And I don't need to get the clock speed to make it correct. But it's not really precise though... It is waiting about twice as long as it should be.
+

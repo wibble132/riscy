@@ -1,0 +1,93 @@
+
+
+Setup:
+
+Have 2 press buttons connected to GPIO20,GPIO21
+Have rotary dial connected to GPIO16,GPIO17
+
+Have LEDs connected to GPIO0-3
+
+Goals:
+
+1. Pressing button 1 (GPIO20) turns on LED (GPIO0) (and off when released)
+2. Pressing button 2 (GPIO21) toggles LED (GPIO0) (and inverts the toggle behaviour)
+
+3, Turning rotary dial changes which LED (GPIO1-3) is on. Wrap around from one end to the next.
+
+Plan:
+
+1. We have lots of pins to setup for these goals, let's create a functions for this - one for output and one for input
+
+2. Goal 1
+Init GPIO0 as output, init GPIO20 as input. 
+Loop {
+  on = is_pressed(GPIO20);
+  set_output(GPIO0, on);
+}
+
+
+3. Goal 2
+Init GPIO1 as output, init GPIO21 as input
+
+was_pressed = 0
+Loop {
+  pressed = is_pressed(GPIO21);
+  if (!was_pressed) && pressed {
+    toggle_output(GPIO1); // I think there is a register for this?
+    // If no toggle register:
+    //  Have some is_on outside the loop
+    set_output(GPIO1, is_on);
+    is_on xor= 1;
+  }
+
+  was_pressed = pressed; 
+}
+
+
+
+Doing it:
+
+
+
+1.
+
+To setup GPIO N:
+  # Reset the pin to avoid accidental output
+  SIO:GPIO_OE_CLR write (1 << N)  (clear output enable)
+  SIO:GPIO_OUT_CLR write (1 << N) (clear output value)
+  # Disable isolation, clear output disable
+  PADSBANK0:GPIO[N] clear bit 8,7, write bit 6 (BANK0:GPION = BANK0 + 4*(N+1))
+  # Set pin function to SIO
+  IO_USER_BANK0:GPIO[N]_CTRL write 0x05 (IO_USER_BANK0:GPIO[N]_CTRL = IO_USER_BANK0 + 8*N + 1)
+  
+Then set the direction:
+  # Write for output, clear for input
+  SIO:GPIO_OE_SET write/clear (1 << N)
+
+
+Have two functions for this:
+
+setup_pin: (x10 = pin number, MUST be in 0..31)
+0200
+
+set_direction: (x10 = pin_number MUST be 0..31; x11 0 for IN, 1 for OUT)
+0280
+
+2. 
+
+setup_pin(x10 = 0)
+set_direction(x10 = 0; x11 = 1) # OUTPUT
+
+setup_pin(x10 = 20)
+set_direction(x10 = 20; x11 = 0) # INPUT
+
+loop {
+  var0 = read_pin(x10 = 20)
+  set_pin(x10 = 0; x11 = var0)
+}
+
+Add two new functions
+0300 read_pin: (x10 = pin_number MUST be 0..31) -> (x10 1 if HIGH, 0 if LOW)
+0380 write_pin: (x10 = pin_number MUST be 0..31; x11 = 1 for ON, 0 for OFF)
+
+
