@@ -91,3 +91,60 @@ Add two new functions
 0380 write_pin: (x10 = pin_number MUST be 0..31; x11 = 1 for ON, 0 for OFF)
 
 
+
+
+# Rotary reading
+
+Have written an asm function to read the two pins and return 0,1,2,3 depending on the state of the pins.
+
+Default position is 0.
+A turn left is 0,1,2,3,0
+A turn right is 0,3,2,1,0
+Allow intermediate changes, e.g. 0,1,2,1,2,1,2,3,0 is a left turn
+
+a pseudo-code version:
+
+rotary_check(direction, prev, cur) -> (new_direction, LED_change) {
+  # No change
+  if x11 == x12 {
+    return (direction,0);
+  }
+
+  # Turn started, 0 to a position
+  if prev == 0 {
+    switch cur {
+      # Can't tell
+      2 => return (0,0);
+      # Starting a direction
+      1 => return (1,0);
+      3 => return (-1,0);
+      _ => impossible;
+    }
+  }
+
+  # Middle of a turn
+
+  # If we don't know the direction, wait until we hit 0 again
+  if direction == 0 {
+    return (0,0);
+  }
+
+  switch (prev,cur) {
+    # Intermediate 1-steps, continue with same direction flag
+    (1,2) | (2,1) | (2,3) | (3,2) => return (direction,0);
+    # Intermediate 2-steps, don't know which direction. Clear direction
+    (1,3) | (3,1) | (2,0) => return (0,0);
+    # Finishing steps, check the direction for complete or reset
+    (1,0) => if dir == -1 { return (0,-1); } else { return (0,0); }
+    (3,0) => if dir == +1 { return (0,+1); } else { return (0,0); }
+    _ => impossible
+  }
+}
+
+Case count:
+ - equality check - 4 cases
+ - start with 0 - 3 cases
+ - 1-steps - 4 cases
+ - 2-steps - 3 cases
+ - finishing - 2 cases
+Total of 4+3+4+3+2 = 16 cases. All pairs from {0,1,2,3} covered.
