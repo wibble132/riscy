@@ -310,22 +310,22 @@ main: (assume nothing is initialised)
 
       # Init GPIO 0 as output
 0004  ADDI x10,x0,0                                 [13,05,00,00]
-0008  JAL x1,setup_pin(->0200,0x001FC)              [EF,00,C0,1F]
+0008  JAL x1,setup_pin(->0200, _)              [EF,00,C0,1F] [[
 000C  ADDI x10,x0,0                                 [13,05,00,00]
 0010  ADDI x11,x0,1                                 [93,05,10,00]
-0014  JAL x1,set_direction(->0280,0x00270)          [EF,00,00,27]
+0014  JAL x1,set_direction(->0280, _)          [EF,00,00,27] [[
       # INIT GPIO 20 as input
 0018  ADDI x10,x0,0x014                             [13,05,40,01]
-001C  JAL x1,setup_pin(->0200,0x001E8)              [EF,00,80,1E]
+001C  JAL x1,setup_pin(->0200, _)              [EF,00,80,1E] [[
 0020  ADDI x10,x0,0x014                             [13,05,40,01]
 0024  ADDI x11,x0,0x000                             [93,05,00,00]
-0028  JAL x1,set_direction(->0280,0x0025C)          [EF,00,C0,25]
+0028  JAL x1,set_direction(->0280, _)          [EF,00,C0,25] [[
       # INIT GPIO 21 as input
 002C  ADDI x10,x0,0x015                             [13,05,50,01]
-0030  JAL x1,setup_pin(->0200,0x001D4)              [EF,00,40,1D]
+0030  JAL x1,setup_pin(->0200, _)              [EF,00,40,1D] [[
 0034  ADDI x10,x0,0x015                             [13,05,50,01]
 0038  ADDI x11,x0,0x000                             [93,05,00,00]
-003C  JAL x1,set_direction(->0280,0x00248)          [EF,00,80,24]
+003C  JAL x1,set_direction(->0280, _)          [EF,00,80,24] [[
       # Init GPIO 16 as input
 0040  ADDI x10,x0,0x010                             [13,05,00,01]
 0044  JAL x1,setup_pin(->0200, _)              [EF,00,40,1D] [[
@@ -341,30 +341,62 @@ main: (assume nothing is initialised)
 
 
 
-    # x8: previous GPIO 21 value (to detect change-to-on)
-    # x9: LED toggle value (changes whenever GPIO 21 pressed)
+    # x8: previous toggle button value
+    # x9: led toggled
+    # x18: rotary direction
+    # x19: previous rotary value
+    # x20: rotary led on
+    # x21: rotary led number
     # These are callee-saved, so won't be overwritten by functions
 00 ADDI x8,x0,0                                   [13,04,00,00]
 00 ADDI x9,x0,0                                   [93,04,00,00]
+00 ADDI x18,x0,0
+00 ADDI x19,x0,0
+00 ADDI x20,x0,1
+00 ADDI x21,x0,0
 
-loop:
-      # Read GPIO 21, loads into x10
+main_loop:
+      # Toggle button update
+
+      # toggle_button_value(x10) = read_pin(21)
 0044  ADDI x10,x0,0x015                             [13,05,50,01]
 0048  JAL x1,read_pin(->0300,+0x002B8)              [EF,00,80,2B]
-      # If x8 is 0 and x10 is 1 (i.e. not 0), button was just pressed. So toggle x9
+      # if (previous_toggle_button == 0 && toggle_button_value == 1)
 004C  BNE x8,x0,label1(+0x00C)                      [63,16,80,00]
 0050  BEQ x10,x0,label1(+0x008)                     [63,04,A0,00]
+      # led_toggled = xor(led_toggled, 1)
 0054  XORI x9,x9,0x001                              [93,C4,14,00]
+      # end if
 label1:
+      # previous_toggle_button_value(x8/s0) = toggle_button_value(x10)
 0058  ADDI x8,x10,0x000                             [13,04,05,00]
 
-      # Read GPIO 20, loads in x10
+      # Read LED button and set LED0
+
+      # led_button_value(x10/a0) = read_pin(21)
 005C  ADDI x10,x0,0x14                              [13,05,40,01]
 0060  JAL x1,read_pin(->0300,0x002A0)               [EF,00,00,2A]
-      # Turn LED on if x6 is on XOR button 21 is pressed
+      # led_0_on(x11/a1) = xor(led_button_value(x10/a0), led_toggled(x8/s0))
 0064  XOR x11,x10,x9                                [B3,45,95,00]
+      # set_pin(0, led_0_on(x11 already set))  
 0068  ADDI x10,x0,0x000                             [13,05,00,00]
 006C  JAL x1,set_pin(->0380,0x00314)                [EF,00,40,31]
+
+      # Read Rotary & update LEDs
+
+  # rotary_value(x22/s6) = rotary_read()
+  JAL x1,read_rotary(->_, _)
+  ADDI x22,x10,0
+  # (new_rotary_direction(x10/a0), rotary_led_change(x11)) =
+  #   rotary_check(rotary_direction(x18/s2), previous_rotary_value(x19/s3), rotary_value(x22/s6))
+  ADDI x10,x18,0
+  ADDI x11,x19,0
+  ADDI x12,x22,0
+  JAL x1,rotary_check(->_, _)
+  # rotary_direction(x18/s2) = new_rotary_direction(x10/a0)
+  ADDI 
+  
+
 0070  JAL x0,loop(->0044,-28,0xFFFD4)               [6F,F0,5F,FD]
 
 

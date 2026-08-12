@@ -148,3 +148,56 @@ Case count:
  - 2-steps - 3 cases
  - finishing - 2 cases
 Total of 4+3+4+3+2 = 16 cases. All pairs from {0,1,2,3} covered.
+
+Connections:
+0-4: LEDS    20: LED ON,  21: LED Toggle, 16-17: Rotary
+
+
+The main function:
+
+init 0,1,2,3,4 as outputs
+init 20,21,16,17 as inputs 
+
+
+previous_toggle_button_value(x8/s0) = 0
+led_toggled(x9/s1) = 0
+
+rotary_direction(x18/s2) = 0
+previous_rotary_value(x19/s3) = 0
+rotary_led_on(x20/s4) = 1
+rotary_led_num(x21/s5) = 0
+
+loop {
+  # Read toggle button
+  {
+    temp  toggle_button_value = read_pin(21);
+    if (previous_toggle_button_value == 0 && toggle_button_value == 1) {
+      led_toggled = xor(led_toggled, 1);
+    }
+    previous_toggle_button_value = toggle_button_value;
+  }
+
+  # Read LED button & set LED0
+  {
+    temp led_button_value = read_pin(21);
+    temp led_0_on = xor(led_button_value, led_toggled)
+    set_pin(0, led_0_on)
+  }
+
+  # Read rotary
+  {
+    temp rotary_value = rotary_read()
+    temp (new_rotary_direction, rotary_led_change) = rotary_check(rotary_direction, previous_rotary_value, rotary_value)
+    rotary_direction = new_rotary_direction
+    previous_rotary_value = rotary_value
+    if (rotary_led_change != 0) {
+      temp old_pin = add(rotary_led_num, 1)
+      set_pin(old_pin, 0)
+      rotary_led_num = add(rotary_led_num, rotary_led_change)
+      rotary_led_num = add(rotary_led_num, 4) # (4 == ROTARY_LED_COUNT)
+      rotary_led_num = and(rotary_led_num, 3) # and(_,3) is mod(_,4), but 1 cycle
+      temp new_pin = add(rotary_led_num, 1)
+      set_pin(new_pin, rotary_led_on)
+    }
+  }
+}
