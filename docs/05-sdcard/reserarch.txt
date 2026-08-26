@@ -1,0 +1,13 @@
+
+
+SD Card background
+
+(accessed from an archive link from Wikipedia, https://web.archive.org/web/20131205014133/https://www.sdcard.org/downloads/pls/simplified_specs/archive/part1_301.pdf)
+
+- Send a command over the CMD pin (addressed, or broadcast)
+- Response sent back over CMD
+- Data sent by data lines
+
+
+
+

@@ -198,19 +198,20 @@ rotary_read() -> (x10 is current rotary state, as listed above)
       # Registers: use (x8)
   
       # rlist = 0x5, spimm=0
-0400  cm.push {x1,x8},-16    10111000_01010010
+0400  cm.push {x1,x8},-16                           [52,B8] 10111000_01010010
 
       # Note[TODO]: probably should do a single read from the gpio register, instead of two.
       # Probably fine with the speed this runs at, but would be more "correct" and slightly more efficient
+      # TODO2: Should find what NOP is in compact, so I can align the JAL to 4-byte aligned addresses (adds 1 cycle in the instruction fetch when returning to offset location)
 
       # Read from pin 16 (left), store to x8
-0402  ADDI x10,x0,0x010
-0406  JAL x1,read_pin(->0300, _)
-040A  ADDI x8,x10,0
+0402  ADDI x10,x0,0x010                             [13,05,00,01]
+0406  JAL x1,read_pin(->0300, -106,0x1FFEFA)        [EF,F0,BF,EF]
+040A  ADDI x8,x10,0                                 [13,04,05,00]
 
       # Read from pin 17 (right), leave in x10
-040E  ADDI x10,x0,0x011
-0412  JAL x1,read_pin(->0300, _)
+040E  ADDI x10,x0,0x011                             [13,05,10,01]
+0412  JAL x1,read_pin(->0300, -112,0x1FFEEE)        [EF,F0,FF,EE]
 
       # 00 -> 00
       # 10 -> 01
@@ -218,47 +219,47 @@ rotary_read() -> (x10 is current rotary state, as listed above)
       # 01 -> 11
 
       # Bit 0 is left xor right, store to x5
-0416  XOR x5,x8,x10
+0416  XOR x5,x8,x10                                 [B3,42,A4,00]
       # Bit 1 is right. Shift to right place
-041A  SLLI x10,x10,1
+041A  SLLI x10,x10,1                                [13,15,15,00]
       # Combine the bits, into the result
-041E  OR x10,x10,x5
+041E  OR x10,x10,x5                                 [33,65,55,00]
 
       # as with cm.push in header, rlist=0x5, spimm=0
-0422  cm.popret {x1,x8}, 16  10111110_01010010
+0422  cm.popret {x1,x8}, 16                         [52,BE] 10111110_01010010
 
 
 rotary_check: (x10: direction indicator, x11: prev value, x12: current value) -> (x10: new direction indicator, x11: LED change)
   # If values are equal, do nothing, output the same dir indicator
-0480  BNE x11,x12,_values_different
-0484  ADDI x11,x0,0x000
-0488  RET
+0480  BNE x11,x12,_values_different(+0x000C)        [63,96,C5,00]
+0484  ADDI x11,x0,0x000                             [93,05,00,00]
+0488  RET                                           [67,80,00,00]
 _values_different:
   # The value has changed. What now!?
   # If old was zero, we set the direction indicator and return
-048C  BNE x11,x0,_prev_not_zero
+048C  BNE x11,x0,_prev_not_zero(->04B8,+0x002C)     [63,93,05,02]
   # Cases of current must be 1, 2, or 3
-0490  ADD x5,x0,0x001 # Case 1
-0494  BNE x12,x5,_prev_0_curr_23
+0490  ADDI x5,x0,0x001 # Case 1                     [93,02,10,00]
+0494  BNE x12,x5,_prev_0_curr_23(->4A0,+0xC)        [63,16,56,00]
   # Have (0 -> 1, set direction to left)
-0498  ADD x10,x0,0x001
-049C  RET
+0498  ADDI x10,x0,0x001                             [13,05,10,00]
+049C  RET                                           [67,80,00,00]
 _prev_0_curr_23:
-04A0  ADD x5,x0,0x003
-04A4  BNE x12,x5,_prev_0_curr_3
+04A0  ADDI x5,x0,0x003                              [93,02,30,00]
+04A4  BNE x12,x5,_prev_0_curr_3(+0xC)               [63,16,56,00]
   # Have (0 -> 3, set direction to right)
-04A8  ADD x10,x0,0xFFF
-04AC  RET
+04A8  ADDI x10,x0,0xFFF                             [13,05,F0,FF]
+04AC  RET                                           [67,80,00,00]
 _prev_0_curr_3:
   # Have (0 -> 2). No clue. Direction 0,
-04B0  ADD x10,x0,0x000
-04B4  RET
+04B0  ADDI x10,x0,0x000                             [13,05,00,00]
+04B4  RET                                           [67,80,00,00]
 
 _prev_not_zero:
   # Prev is 1,2,3. Expect direction to be non-zero. If is 0, just ret since we no clue.
-04B8  BNE x10,x0,_direction_set
-04BC  ADDI x11,x0,0x000
-04C0  RET
+04B8  BNE x10,x0,_direction_set(+0xC)               [63,16,56,00]
+04BC  ADDI x11,x0,0x000                             [93,05,00,00]
+04C0  RET                                           [67,80,00,00]
 _direction_set:
   # Remaining cases:
   #  (1->2),(2->1),(2->3),(3->2) all just do nothing, since they are intermediate steps.
@@ -266,78 +267,78 @@ _direction_set:
   #  (1->0),(3->0) check direction - might be completed, might be reset
 
   # Load 1,2,3 into temp registers to use for the comparisons
-04C4  ADD x5,x0,0x001
-04C8  ADD x6,x0,0x002
-04CC  ADD x7,x0,0x003
+04C4  ADDI x5,x0,0x001                              [93,02,10,00]
+04C8  ADDI x6,x0,0x002                              [13,03,20,00]
+04CC  ADDI x7,x0,0x003                              [93,03,30,00]
 
   # Check the cases  
-04D0  BEQ x11,x6,_prev_2
-04D4  BEQ x11,x7,_prev_3
+04D0  BEQ x11,x6,_prev_2(->508,+0x038)              [63,8C,65,02]
+04D4  BEQ x11,x7,_prev_3(->4F0,+0x01C)              [63,8E,75,00]
 _prev_1:
-04D8  BEQ x12,x6,_same_direction  # (1,2)
-04DC  BEQ x12,x7,_reset_direction # (1,3)
+04D8  BEQ x12,x6,_same_direction  # (1,2) (+0x3C)   [63,0E,66,02]
+04DC  BEQ x12,x7,_reset_direction # (1,3) (+0x34)   [63,0A,76,02]
   # (1,0), complete to the right
-04E0  BEQ x10,x6,_reset_direction # (1,0), started left
+04E0  BEQ x10,x6,_reset_direction # (1,0), started left (+0x30) [63,08,65,02] 
   # Return (0,-1)
-04E4  ADDI x10,x0,0x000
-04E8  ADDI x11,x0,0xFFF
-04EC  RET
+04E4  ADDI x10,x0,0x000                             [13,05,00,00]
+04E8  ADDI x11,x0,0xFFF                             [93,05,F0,FF]
+04EC  RET                                           [67,80,00,00]
 _prev_3:
-04F0  BEQ x12,x6,_reset_direction # (3,1)
-04F4  BEQ x12,x7,_same_direction  # (3,2)
+04F0  BEQ x12,x6,_reset_direction # (3,1) (+0x20)   [63,00,66,02]
+04F4  BEQ x12,x7,_same_direction  # (3,2) (+0x20)   [63,00,76,02]
   # Complete to the left
-04F8  BLT x10,x0,_reset_direction # (3,0), started right
+04F8  BLT x10,x0,_reset_direction # (3,0), started right (+0x18)  [63,4C,05,00]
   # Return (0,1)
-04FC  ADDI x10,x0,0x000
-0500  ADDI x11,x0,0x001
-0504  RET
+04FC  ADDI x10,x0,0x000                             [13,05,00,00]
+0500  ADDI x11,x0,0x001                             [93,05,10,00]
+0504  RET                                           [67,80,00,00]
 _prev_2: 
-0508  BEQ x12,x5,_same_direction  # (2,1)
-050C  BEQ x12,x7,_same_direction  # (2,3)
+0508  BEQ x12,x5,_same_direction  # (2,1) (+0xC)    [63,06,56,00]
+050C  BEQ x12,x7,_same_direction  # (2,3) (+0x8)    [63,04,76,00]
   # (2,0), continue to _reset_direction
 _reset_direction:
-0510  ADDI x10,x0,0x000
-_nothing:
-0514  ADDI x11,x0,0x000
-0518  RET
+0510  ADDI x10,x0,0x000                             [13,05,00,00]
+_same_direction:
+0514  ADDI x11,x0,0x000                             [93,05,00,00]
+0518  RET                                           [67,80,00,00]
 
 
 ## Actual main
 main: (assume nothing is initialised)
   # Set stack pointer to RAM_BASE(0x2000_0000) + 0x1000 (4K of stack) (have 512K I can use, so could increase)
-0000  LUI x2,0x20001
+0000  LUI x2,0x20001                                [37,11,00,20]
      
 
       # Init GPIO 0 as output
 0004  ADDI x10,x0,0                                 [13,05,00,00]
-0008  JAL x1,setup_pin(->0200, _)              [EF,00,C0,1F] [[
+0008  JAL x1,setup_pin(->0200, 0x0001F8)            [EF,00,80,1F]
 000C  ADDI x10,x0,0                                 [13,05,00,00]
 0010  ADDI x11,x0,1                                 [93,05,10,00]
-0014  JAL x1,set_direction(->0280, _)          [EF,00,00,27] [[
+0014  JAL x1,set_direction(->0280, 0x00026C)        [EF,00,C0,26]
       # INIT GPIO 20 as input
 0018  ADDI x10,x0,0x014                             [13,05,40,01]
-001C  JAL x1,setup_pin(->0200, _)              [EF,00,80,1E] [[
+001C  JAL x1,setup_pin(->0200, 0x0001E4)            [EF,00,40,1E]
 0020  ADDI x10,x0,0x014                             [13,05,40,01]
 0024  ADDI x11,x0,0x000                             [93,05,00,00]
-0028  JAL x1,set_direction(->0280, _)          [EF,00,C0,25] [[
+0028  JAL x1,set_direction(->0280, 0x000258)        [EF,00,80,25]
       # INIT GPIO 21 as input
 002C  ADDI x10,x0,0x015                             [13,05,50,01]
-0030  JAL x1,setup_pin(->0200, _)              [EF,00,40,1D] [[
+0030  JAL x1,setup_pin(->0200, 0x0001D0)            [EF,00,00,1D]
 0034  ADDI x10,x0,0x015                             [13,05,50,01]
 0038  ADDI x11,x0,0x000                             [93,05,00,00]
-003C  JAL x1,set_direction(->0280, _)          [EF,00,80,24] [[
+003C  JAL x1,set_direction(->0280, 0x000244)        [EF,00,40,24]
       # Init GPIO 16 as input
 0040  ADDI x10,x0,0x010                             [13,05,00,01]
-0044  JAL x1,setup_pin(->0200, _)              [EF,00,40,1D] [[
+0044  JAL x1,setup_pin(->0200, 0x0001B4)            [EF,00,C0,1B] [
 0048  ADDI x10,x0,0x010                             [13,05,00,01]
 004C  ADDI x11,x0,0x000                             [93,05,00,00]
-0050  JAL x1,set_direction(->0280, _)          [EF,00,80,24] [[
+0050  JAL x1,set_direction(->0280, 0x000230)        [EF,00,00,23]
       # Init GPIO 17 as input 
 0054  ADDI x10,x0,0x011                             [13,05,10,01]
-0058  JAL x1,setup_pin(->0200, _)              [EF,00,40,1D] [[
+0058  JAL x1,setup_pin(->0200, 0x0001A8)            [EF,00,80,1A]
 005C  ADDI x10,x0,0x011                             [13,05,10,01]
 0060  ADDI x11,x0,0x000                             [93,05,00,00]
-0064  JAL x1,set_direction(->0280, _)          [EF,00,80,24] [[
+0064  JAL x1,set_direction(->0280, 0x00021C)        [EF,00,C0,21]
 
 
 
@@ -348,57 +349,76 @@ main: (assume nothing is initialised)
     # x20: rotary led on
     # x21: rotary led number
     # These are callee-saved, so won't be overwritten by functions
-00 ADDI x8,x0,0                                   [13,04,00,00]
-00 ADDI x9,x0,0                                   [93,04,00,00]
-00 ADDI x18,x0,0
-00 ADDI x19,x0,0
-00 ADDI x20,x0,1
-00 ADDI x21,x0,0
+0068 ADDI x8,x0,0                                   [13,04,00,00]
+006C ADDI x9,x0,0                                   [93,04,00,00]
+0070 ADDI x18,x0,0                                  [13,09,00,00]
+0074 ADDI x19,x0,0                                  [93,09,00,00]
+0078 ADDI x20,x0,1                                  [13,0A,10,00]
+007C ADDI x21,x0,0                                  [93,0A,00,00]
 
 main_loop:
       # Toggle button update
 
       # toggle_button_value(x10) = read_pin(21)
-0044  ADDI x10,x0,0x015                             [13,05,50,01]
-0048  JAL x1,read_pin(->0300,+0x002B8)              [EF,00,80,2B]
+0080  ADDI x10,x0,0x015                             [13,05,50,01]
+0084  JAL x1,read_pin(->0300, 0x027C)               [EF,00,C0,27]
       # if (previous_toggle_button == 0 && toggle_button_value == 1)
-004C  BNE x8,x0,label1(+0x00C)                      [63,16,80,00]
-0050  BEQ x10,x0,label1(+0x008)                     [63,04,A0,00]
+0088  BNE x8,x0,label1(+0x00C)                      [63,16,80,00]
+008C  BEQ x10,x0,label1(+0x008)                     [63,04,A0,00]
       # led_toggled = xor(led_toggled, 1)
-0054  XORI x9,x9,0x001                              [93,C4,14,00]
+0090  XORI x9,x9,0x001                              [93,C4,14,00]
       # end if
-label1:
+label1(0094):
       # previous_toggle_button_value(x8/s0) = toggle_button_value(x10)
-0058  ADDI x8,x10,0x000                             [13,04,05,00]
+0094  ADDI x8,x10,0x000                             [13,04,05,00]
 
       # Read LED button and set LED0
 
       # led_button_value(x10/a0) = read_pin(21)
-005C  ADDI x10,x0,0x14                              [13,05,40,01]
-0060  JAL x1,read_pin(->0300,0x002A0)               [EF,00,00,2A]
+0098  ADDI x10,x0,0x14                              [13,05,40,01]
+009C  JAL x1,read_pin(->0300, 0x0264)               [EF,00,40,26]
       # led_0_on(x11/a1) = xor(led_button_value(x10/a0), led_toggled(x8/s0))
-0064  XOR x11,x10,x9                                [B3,45,95,00]
+00A0  XOR x11,x10,x9                                [B3,45,95,00]
       # set_pin(0, led_0_on(x11 already set))  
-0068  ADDI x10,x0,0x000                             [13,05,00,00]
-006C  JAL x1,set_pin(->0380,0x00314)                [EF,00,40,31]
+00A4  ADDI x10,x0,0x000                             [13,05,00,00]
+00A8  JAL x1,set_pin(->0380, 0x02D8)                [EF,00,80,2D]
 
       # Read Rotary & update LEDs
 
   # rotary_value(x22/s6) = rotary_read()
-  JAL x1,read_rotary(->_, _)
-  ADDI x22,x10,0
-  # (new_rotary_direction(x10/a0), rotary_led_change(x11)) =
+00AC  JAL x1,read_rotary(->400, 0x00354)            [EF,00,40,35]
+00B0  ADDI x22,x10,0                                [13,0B,05,00]
+  # (new_rotary_direction(x10/a0), rotary_led_change(x23/s7)) =
   #   rotary_check(rotary_direction(x18/s2), previous_rotary_value(x19/s3), rotary_value(x22/s6))
-  ADDI x10,x18,0
-  ADDI x11,x19,0
-  ADDI x12,x22,0
-  JAL x1,rotary_check(->_, _)
+00B4  ADDI x10,x18,0x000                            [13,05,09,00]
+00B8  ADDI x11,x19,0x000                            [93,85,09,00]
+00BC  ADDI x12,x22,0x000                            [13,06,0B,00]
+00C0  JAL x1,rotary_check(->480, 0x03C0)            [EF,00,00,3C]
+00C4  ADDI x23,x11,0x000                            [93,8B,05,00]
   # rotary_direction(x18/s2) = new_rotary_direction(x10/a0)
-  ADDI 
-  
-
-0070  JAL x0,loop(->0044,-28,0xFFFD4)               [6F,F0,5F,FD]
-
+00C8  ADDI x18,x10,0x000                            [13,09,05,00]
+  # previous_rotary_value(x19) = rotary_value(x22)
+00CC  ADDI x19,x22,0x000                            [93,09,0B,00]
+  # if (rotary_led_change(x11/a1) != 0) {
+00D0  BEQ x11,x0,_end_if_rotary_change(->0F4, 0x0024)[63,82,05,02]
+  # old_pin(x10/a0) = add(rotary_led_num(x21/s5), 1)
+  # call set_pin(old_pin, 0)
+00D4  ADDI x10,x21,0x001                            [13,85,1A,00]
+00D8  ADDI x11,x0,0x000                             [93,05,00,00]
+00DC  JAL x1,set_pin(->0380, 0x2A4)
+  # rotary_led_num(x21/s5) = add(rotary_led_num(x21/s5), rotary_led_change(x23/s7))
+00E0  ADD x21,x21,x23                               [B3,85,75,01]
+  # rotary_led_num(x21/s5) = add(rotary_led_num(x21/s5), 4)
+00E4  ADDI x21,x21,0x004                            [93,8A,4A,00]
+  # rotary_led_num(x21/s5) = and(rotary_led_num(x21/s5), 3)
+00E8  ANDI x21,x21,0x003                            [93,FA,3A,00]
+  # new_pin(x10/a0) = add(rotary_led_num(x21/s5), 1)
+  # call set_pin(new_pin(x10/a0), rotary_led_on(x20/s4))
+00EC  ADDI x11,x20,0x000                            [93,05,0A,00]
+00F0  JAL x1,set_pin(->0380, 0x0290)                [EF,00,00,29]
+  # }
+_end_if_rotary_change:
+00F4  JAL x0,main_loop(->0080,-74,0x1FFF8C)         [6F,F0,DF,F8]
 
 
 
