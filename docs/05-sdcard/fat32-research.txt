@@ -1,0 +1,102 @@
+Read some of a doc, and now created a mkfs.fat file image - this is what I see:
+
+
+2GB image, FAT32,
+
+- jump to boot code, points to 0x58 (more later)
+- OEMName - "mkfs.fat", makes sense, that created it
+- BytsPerSec - 512 (almost-always value)
+- SecPerClus - 8 (so clusters are 4Ki)
+- RsvdSecCnt - 32 sectors (typical value)
+- NumFATs - 2 (typical)
+- RootEntCnt   - 0   (forced FAT32)
+- TotSec16     - 0   (forced FAT32)
+- Media        - 0xf8 (fixed media, I probably want 0xf0)
+- FATSz16      - 0   (forced FAT32)
+- SecPerTrack  - 63  ?
+- NumHeads     - 32  ?
+- HiddSec      - 0
+- TotSec32     - 0x000ffffc (1048572, *BytesPerSec=511.998MiB. 4 sectors left blank)
+FAT32ONLY BPB fields:
+- FATSz32      - 0x400 = 1024
+- ExtFlags     - 0
+- FSVer        - 0:0
+- RootClus     - 2  (usual value)
+- FSInfo       - 1  (usual, sector number of the FSINFO structure)
+- BkBootSec    - 6  (usual, recommended)
+- reserved - 0
+Some non-BPB start fields:
+- DrvNum - 80
+- Reserved1 - 1  (not 0 ??)
+- BootSig - 29
+- VolID - [0xb2, 0x84, 0x2d, 0xb6]
+- VolLab - "NO NAME    "
+- FilSysType - "FAT32   "
+
+
+So
+FirstDataSector = ResvdSecCnt + (NumFATs * FatSz32) = 32 + (2 * 1024) = 2080 (=0x820)
+For a cluster N, FirstSectorOfCluster = ((N - 2) * 8) + 2080 = 8N + 2048
+
+Check the FAT type:
+RootDirSectors = 0
+FATSz = 1024
+TotSec = 1048572
+DataSec = 1048572 - (32 + (2 * 1024) + 0) = 1046492
+CountOfClusters = 1046492 / 8 = 130811 (round down)
+This is >= 65525, so this IS a FAT32 file system.
+
+And we have for cluster number N,
+FatOffset = 4N
+ThisFATSecNum = 32 + (4N / 512)
+ThisFATEntOffset = 4N % 512
+
+
+
+The root directory is Cluster 2, so the sector is (32 + (8 / 512)) = 32
+And offset is 8 % 512 = 8.
+
+This reads: 0ffffff8. End of cluster.
+So what data is in cluster 2?
+FirstSectorOfCluster = 2080.
+This has DirectoryEntryStructure of:
+1.
+ - Name - [41 64 00 61 00 74 00 61 00 00 00] (="Ad.a.t.a...")
+ - Attr - 0x0f, LONG_NAME
+ - NTRes - 0
+ - CrtTimeTenth - 0x43
+ - CrtTime - 0xffff
+ - CrtDate - 0xffff
+ - LstAccDate - 0xffff
+ - FstClusHI - 0xffff
+ - WrtTime - 0xffff
+ - WrtDate - 0xffff
+ - FstClusLO - 0x0000
+ - FileSize - 0xffffffff
+2.
+ - Name - [44 41 54 41 20 20 20 20 20 20 20] (="DATA.......")
+ - Attr - 0x20, ARCHIVE
+ - NTRes - 0
+ - CrtTimeTenth - 0x0c
+ - CrtTime - 0x6f77
+ - CrtDate - 0x5d22
+ - LstAccDate - 0x5d22
+ - FstClusHI - 0x0000
+ - WrtTime - 0x6f77
+ - WrtDate - 0x5d22
+ - FstClusLO - 0x0003
+ - FileSize - 0x00019000
+3.
+ - Name - [41 68 00 65 00 6C 00 6C 00 6F 00] (="AH.E.L.L.O.")
+ - Attr - 0x0f, LONG_NAME                              
+ - NTRes - 0
+ - CrtTimeTenth - 0x14
+ - CrtTime - 0xffff
+ - CrtDate - 0xffff
+ - LstAccDate - 0xffff
+ - FstClusHI - 0xffff
+ - WrtTime - 0xffff
+ - WrtDate - 0xffff
+ - FstClusLO - 0x0000
+ - FileSize - 0xffffffff
+

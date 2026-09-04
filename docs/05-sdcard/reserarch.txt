@@ -11,3 +11,152 @@ SD Card background
 
 
 
+RP2350 SPI:
+
+1. Is the SPI defaulted to reset state? Do I need to unset the reset (0x40020000 + 0x0 bits 18/19, then read 0x40020000 + 0x8 bits 18/19 until they are 0)
+2. Need to set a baudrate - look at the scaling values. Can I just leave things at the default, and then be happy?
+3. Need to set spi registers - SSPCR0 - write SPH, SPO, DSS. (do I need to write to FRF? Does it default to 00, Motorola SPI). SCR probably set while setting clock timings.
+                             - SSPCR1 - Set Enabled (other values should be fine as 0 defaults)
+Now SPI should be enabled.
+
+Then we can send/recieve from the SPI. Each write will send a set of clock ticks, which then also causes reads. This goes into the FIFO buffers which will need to be checked.
+
+
+SD Card:
+
+Knowing how the spi on the chip works, what does sd card want in spi mode?
+
+- I send a command
+- THEN I get a response
+
+So I need to write command, clear FIFO, then write nonsense data (of the desired response length), read FIFO.
+
+See SD card Physical Layer Section 7.3 SPI Mode Transaction Packets
+
+e.g.
+
+Sending CMD0:
+
+- start bit, transmission bit:		01
+- command index:			000000
+- argument:				00000000_00000000_00000000_00000000
+- CRC7:					???????
+- end bit:				1
+
+And this should be sent as bytes. One at a time. So we send 0b0100_0000,0,0,0,0,0b0000_0001 (0x40,0x00,0x00,0x00,0x00,0x95)
+
+CRC:
+
+The CRC7 uses generator polynomial x^7 + x^3 + 1
+
+so the crc7 of 01 000000 00000000_00000000_00000000_00000000
+                                           _______
+is 00000000000000000000000000000000000000001001010
+                                          76543210
+
+What is a computer algo for this?
+
+ 1. Split into bytes. Have array<u8, 5>.
+ 2. Take 2 bytes, $val
+ 3. for $s in 15..=7 { if bit (1<<$s) is set in $val, `xori $val,$val,(0b10001001 << ($s-8)) }
+    assert!($val is now 1 byte, <128)
+ 4. if more bytes:
+      $val = ($val << 8) + (next byte in array)
+      jump to 3.
+ 5. CRC7 is left in $val (should be <128)
+
+What about in rv32?
+
+crc7: (a0: pointer to input data, a1: data length) -> (a0: CRC7, or 0 if length==0)
+00 addi t0,x0,0x001                        [93,05,10,00]
+04 bgt a1,t0,_full_loop                    []
+   # 1 or 0 bytes of input
+08 bne x1,0,_1_byte_input
+   
+   # 0 bytes of input
+0c addi a0,x0,0x000
+10 ret
+
+_1_byte_input:
+   # 1 byte of input, just clear the top bit: `if *x0 > 127`
+14 lb t0,0x00(a0)
+18 addi t1,x0,0x80
+1C blt t0,t1,_1_byte_input_ret
+20 xori t0,t0,0b1000_1001
+_1_byte_input_ret:
+   # Move result to a0
+24 addi a0,t0,0x000
+28 ret
+
+   # Main function body, actually do the CRC on data (length >= 2)
+_full_computation:
+   # $val is in t0
+2C lb t0,0x00(a0)
+   # increment array pointer
+30 addi a0,a0,1
+
+_computation_loop:
+  # Add next byte onto $val
+34 lb t1,0x00(a1)
+38 shli t0,t0,8
+3C addi t0,t0,t1
+
+   # Loop variable, $s is in t1
+40 addi t1,x0,0x00F
+_inner_shift_loop:
+   # break loop at s == 6
+44 addi t2,x0,0x006
+48 beq t1,t1,_end_inner_shift_loop
+
+   # get $val & (1<<$s), store to t2
+4C bext t2,t0,t1
+  # if this is 0, continue
+50 beq t2,x0,_inner_shift_loop
+
+  # xor with ( 0b1000_1001 << (k-7) ), which is just subtract a multiple of the generating polynomial
+54 addi a3,t1,-7  #(a3 unused so far)
+58 addi t2,x0,0x089 #(0b1000_1001 - the generating polynomial)
+5C sll t2,t2,a3
+
+60 xor t0,t0,t2
+  
+64 jal x0,_inner_shift_loop
+_end_inner_shift_loop:
+  # Result is in t0, move to a0 for return
+68 addi a0,t0,0x000
+6C ret
+
+
+
+SD Card SPI Responses:
+
+Many commands just send an R1 result - all 0 means all good!
+(I think all the commands I use just send R1)
+
+Read commands send the R1 response, then the data (if no error). Data is followed up with a CRC. After that, it is ready to have another command.
+  If error in read, sends a "data error" token -
+
+Writing data:
+  - send write command
+  - receive response R1
+  - send "start block" token (1byte)
+  - poll the response, will get "data response" then a busy signal until it is ready again
+  - send a SEND_STATUS command to check for other errors
+  - "busy" state just holds the data line low, so will read as constant stream of (0s or 1s)
+
+
+Note on SD card SPI:
+  - host starts transaction by pulling CS low (This means the rp2350 has SPO=1, SPH=0)
+  - always get a response
+
+
+FAT32:
+
+FUCK I PUT SO MUCH NOTES HERE AND ITS FUCK'D OFF CUZ KEYBOARD STOPPED WORKING AND I HAD TO REBOOT. SSHIIIIIIIT.
+
+Have 4 regions:
+ - reserved region - contains the bpb, just a header, at the start. Lots of info about sector size and stuff. 
+ - FATs - these are the tables, live at the start. Almost always duplicated (2 copies in total), and stored in cluster 0 and 1.
+ - root directory region (not in FAT32, rejoyce)
+ - data - the actual files and shit. Use FATs to find out what is where.
+
