@@ -237,7 +237,7 @@ rotary_check: (x10: direction indicator, x11: prev value, x12: current value) ->
 _values_different:
   # The value has changed. What now!?
   # If old was zero, we set the direction indicator and return
-048C  BNE x11,x0,_prev_not_zero(->04B8,+0x002C)     [63,93,05,02]
+048C  BNE x11,x0,_prev_not_zero(->04B8,+0x002C)     [63,93,05,02] imm=2c=0000_0010_1100, 00000010_00000101_10010110_01100011  63,96,05,02
   # Cases of current must be 1, 2, or 3
 0490  ADDI x5,x0,0x001 # Case 1                     [93,02,10,00]
 0494  BNE x12,x5,_prev_0_curr_23(->4A0,+0xC)        [63,16,56,00]
@@ -257,7 +257,7 @@ _prev_0_curr_3:
 
 _prev_not_zero:
   # Prev is 1,2,3. Expect direction to be non-zero. If is 0, just ret since we no clue.
-04B8  BNE x10,x0,_direction_set(+0xC)               [63,16,56,00]
+04B8  BNE x10,x0,_direction_set(+0xC)               [63,16,a0,00]  imm:0x00C=0b0_0000_0000_1100    00000000_10100000_00010110_01100011
 04BC  ADDI x11,x0,0x000                             [93,05,00,00]
 04C0  RET                                           [67,80,00,00]
 _direction_set:
@@ -405,7 +405,7 @@ label1(0094):
   # call set_pin(old_pin, 0)
 00D4  ADDI x10,x21,0x001                            [13,85,1A,00]
 00D8  ADDI x11,x0,0x000                             [93,05,00,00]
-00DC  JAL x1,set_pin(->0380, 0x2A4)
+00DC  JAL x1,set_pin(->0380, 0x2A4)                 [EF,00,40,2A]
   # rotary_led_num(x21/s5) = add(rotary_led_num(x21/s5), rotary_led_change(x23/s7))
 00E0  ADD x21,x21,x23                               [B3,85,75,01]
   # rotary_led_num(x21/s5) = add(rotary_led_num(x21/s5), 4)
