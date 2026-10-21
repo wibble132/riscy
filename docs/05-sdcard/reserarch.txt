@@ -152,7 +152,7 @@ Note on SD card SPI:
 
 FAT32:
 
-FUCK I PUT SO MUCH NOTES HERE AND ITS FUCK'D OFF CUZ KEYBOARD STOPPED WORKING AND I HAD TO REBOOT. SSHIIIIIIIT.
+NOOO I PUT SO MUCH NOTES HERE AND ITS gone'D OFF CUZ KEYBOARD STOPPED WORKING AND I HAD TO REBOOT. SSHoooIIIIIIT.
 
 Have 4 regions:
  - reserved region - contains the bpb, just a header, at the start. Lots of info about sector size and stuff. 
@@ -160,3 +160,90 @@ Have 4 regions:
  - root directory region (not in FAT32, rejoyce)
  - data - the actual files and shit. Use FATs to find out what is where.
 
+- FAT32 note moved to other file.
+
+
+
+
+RP2350 sending some SPI
+
+  void* SPI0_BASE = 0x40080000;
+  // SPI1_BASE =  0x40088000;, not used here
+  void* SSPCR0 =  0x40080000 // SPI0_BASE + 0x000
+  void* SSPCR1 =  0x40080004 // SPIO_BASE = 0x004
+  void* SSPCPSR = 0x40080010 // SPIO_BASE = 0x010
+
+
+init_spi() {
+  // Setup clocks
+  // SSPCPSR divides the SSPCLK by 2-254, then SSPCR0[15:8] divide by 1-256 further.
+  // Let's set both to divide by 64 for now. (If i remember) base clock of 8MHz -> 2KHz. 
+  write_byte(SSPCPSR, 64);
+  write_byte(SSPCR0 + 1, 63);
+  
+  spo = 0b1
+  sph = 0b0
+  frf = 0b00
+  dss = 0b0111 // 8-bit data (TODO - double-check against the sd-card format
+  
+  // So lower byte of SSPCR0 should be 0b10000111
+  write_byte(SSPCR0, 0b1000111);
+
+  // For SSPCR1, we only need to set the SSE (enable) bit 1
+  write_byte(SSPCR1, 0b0000_0010);
+}
+
+  // Must "right-justify" when data size is less than 16-bits? Presume that means we consider the least significant byte  
+  ptr SSPDR = 0x40080008  // SPI0_BASE + 0x008
+
+read_spi() -> u8 { // See comment on SSPSR
+  return read_byte(SSPDR)
+}
+write_spi(a: u8) { // See comment on SSPSR
+  write_byte(SSPDR, a)
+}
+
+  ptr SSPSR = 0x4008000c // SPI0_BASE + 0x00c
+  // This gives status about the FIFO full/empty,
+  // But also BSY busy flag, should wait for this to be ready
+  // Probably should check the FIFOs before reading & writing too...
+
+
+So writing/reading N bytes would be something like
+write_spi_n(n: u32, buf: ptr) {
+  for i in 0..n {
+    loop {
+      let status: u8 = read_byte(SSPSR);
+      let busy: bool = read_bit(status, 4); // busy includes "tx FIFO not empty"
+    } while (busy);
+    
+    let val: u8 = read_byte(buf + i);
+    write_byte(SSPDR, val);
+  }
+
+  loop {
+    // Same as above, ensure the data is finished sending before we continue
+  } while(busy)
+}
+read_spi_n(n: u32, buf: ptr) {
+  for i in 0..n {
+    loop {
+      let status: u8 = read_byte(SSPSR);   
+      let busy: bool = read_bit(status, 4);
+    } while (busy);
+
+    write_byte(SSPDR, 0);
+
+    loop {
+      let status: u8 = read_byte(SSPSR);
+      let rx_fifo_not_empty: bool = read_bit(status, 2); 
+      let rx_fifo_empty = not(rx_fifo_not_empty);
+      // Q: Do I need to check busy here?
+    } wihle (rx_fifo_empty)
+   
+    let val: u8 = read_byte(SSPDR);
+    write_byte(buf + i, val);
+  }
+
+  // Q: Do I need to finish with a busy loop here?
+}
